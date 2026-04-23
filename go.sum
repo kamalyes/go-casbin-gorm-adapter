@@ -10,8 +10,8 @@ github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
 github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
 github.com/jinzhu/now v1.1.5/go.mod h1:d3SSVoowX0Lcu0IBviAWJpolVfI5UJVZZ7cO71lE/z8=
-github.com/kamalyes/go-casbin v0.0.0-20260329125301-7d83b8b8e268 h1:NFXvlRRV11jVfavQtwxPCHCYHU2DOb0OpRllOwuSnsI=
-github.com/kamalyes/go-casbin v0.0.0-20260329125301-7d83b8b8e268/go.mod h1:PNL468O12Ve/mCXUaZfAPEkAHzeS2wuA1Xxm3WA29DI=
+github.com/kamalyes/go-casbin v0.0.0-20260422235629-dcdfe0014a9a h1:SUBxR5l771VcjRfj3RXN6MqB7uBLZh+a450dkPTEK04=
+github.com/kamalyes/go-casbin v0.0.0-20260422235629-dcdfe0014a9a/go.mod h1:3gKEdXaxrt9iHDBGfWlPL+muJ5gTwzMO5inNFJrEKJM=
 github.com/kamalyes/go-jsonpath v0.0.0-20260129163507-0b67ed48bb28 h1:mftqfK+BB1eE+aXca1zAMyKUAGPlcKFwQS7og7bq3Qk=
 github.com/kamalyes/go-jsonpath v0.0.0-20260129163507-0b67ed48bb28/go.mod h1:Yu4Vw7F4dOKlhHK5RzBHYDvoSRdeHJgVwAjqXHXu4p4=
 github.com/kamalyes/go-logger v0.4.6-0.20260320160038-f1cdda12311b h1:v4qTAltU5RF0AaPsVlAgtCPLqSz+K9jhHZkAc6eOD6g=

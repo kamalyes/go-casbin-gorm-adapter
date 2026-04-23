@@ -25,10 +25,11 @@ import (
 
 // 编译时接口断言，确保 Adapter 实现了所有必需的接口
 var (
-	_ policy.Adapter          = (*Adapter)(nil) // 基础适配器接口
-	_ policy.FilteredAdapter  = (*Adapter)(nil) // 过滤适配器接口
-	_ policy.BatchAdapter     = (*Adapter)(nil) // 批量操作适配器接口
-	_ policy.UpdatableAdapter = (*Adapter)(nil) // 可更新适配器接口
+	_ policy.Adapter              = (*Adapter)(nil) // 基础适配器接口
+	_ policy.FilteredAdapter      = (*Adapter)(nil) // 过滤适配器接口
+	_ policy.BatchAdapter         = (*Adapter)(nil) // 批量操作适配器接口
+	_ policy.UpdatableAdapter     = (*Adapter)(nil) // 可更新适配器接口
+	_ policy.TransactionalAdapter = (*Adapter)(nil) // 事务适配器接口
 )
 
 // Adapter 基于 GORM 的策略存储适配器
@@ -426,4 +427,21 @@ func (a *Adapter) GetHandler() db.Handler {
 // 适用于需要原子性操作的场景，如同时更新多条策略
 func (a *Adapter) WithTransaction(fn func(tx *gorm.DB) error) error {
 	return a.handler.GetDB().Transaction(fn)
+}
+
+// ExecuteInTransaction 实现 TransactionalAdapter 接口
+// 在数据库事务中执行回调函数，确保多个适配器操作的原子性
+// 如果事务中任何操作失败，所有操作都会回滚
+func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapter) error) error {
+	return a.handler.GetDB().Transaction(func(tx *gorm.DB) error {
+		txAdapter, err := NewAdapter(db.MustNewGormHandler(tx),
+			WithTableName(a.tableName),
+			WithLogger(a.logger),
+			WithAutoMigrate(false),
+		)
+		if err != nil {
+			return err
+		}
+		return fn(txAdapter)
+	})
 }

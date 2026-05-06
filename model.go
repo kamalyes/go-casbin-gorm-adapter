@@ -40,6 +40,11 @@ func (CasbinRule) TableName() string {
 	return "casbin_rule"
 }
 
+// TableComment 指定表注释
+func (CasbinRule) TableComment() string {
+	return "Casbin策略规则表"
+}
+
 // ToString 将规则转换为策略字符串
 // 格式: "p, alice, data1, read" 或 "g, alice, admin"
 // 自动跳过尾部空字段

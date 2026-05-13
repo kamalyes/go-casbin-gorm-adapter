@@ -3,10 +3,10 @@ module github.com/kamalyes/go-casbin-gorm-adapter
 go 1.25.0
 
 require (
-	github.com/kamalyes/go-casbin v0.0.0-20260422235629-dcdfe0014a9a
-	github.com/kamalyes/go-logger v0.4.6-0.20260320160038-f1cdda12311b
-	github.com/kamalyes/go-sqlbuilder v0.3.6-0.20260320162016-aace3b571965
-	github.com/kamalyes/go-toolbox v0.11.87-0.20260416011949-e35a4e01a90a
+	github.com/kamalyes/go-casbin v0.0.0-20260513071529-b67c4efbc554
+	github.com/kamalyes/go-logger v0.4.6
+	github.com/kamalyes/go-sqlbuilder v0.3.7
+	github.com/kamalyes/go-toolbox v0.12.1-0.20260513095929-fd679e7646ee
 	gorm.io/gorm v1.30.0
 )
 

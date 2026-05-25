@@ -183,24 +183,28 @@ func (a *Adapter) AddPoliciesWithCtx(ctx context.Context, lines []string) error 
 }
 
 // RemovePoliciesWithCtx 批量从数据库删除策略
-// 逐条删除以确保每条策略的精确匹配
+// 使用事务保证原子性：所有删除操作要么全部成功，要么全部回滚
 func (a *Adapter) RemovePoliciesWithCtx(ctx context.Context, lines []string) error {
 	ctx = contextx.OrBackground(ctx)
-
-	for _, line := range lines {
-		rule := ParseRule(line)
-		if rule == nil {
-			continue
-		}
-
-		filters := RuleToFilters(rule)
-		if err := a.repo.DeleteByFilters(ctx, filters...); err != nil {
-			return errors.NewPolicyBatchRemoveFailedError(err.Error())
-		}
+	if len(lines) == 0 {
+		return nil
 	}
 
-	a.logger.DebugKV("Policies batch removed from database", "count", len(lines))
-	return nil
+	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+		tx := txAdapter.(*Adapter)
+		for _, line := range lines {
+			rule := ParseRule(line)
+			if rule == nil {
+				continue
+			}
+
+			filters := RuleToFilters(rule)
+			if err := tx.repo.DeleteByFilters(ctx, filters...); err != nil {
+				return errors.NewPolicyBatchRemoveFailedError(err.Error())
+			}
+		}
+		return nil
+	})
 }
 
 // UpdatePolicyWithCtx 更新单条策略
@@ -231,42 +235,61 @@ func (a *Adapter) UpdatePolicyWithCtx(ctx context.Context, oldLine, newLine stri
 }
 
 // UpdatePoliciesWithCtx 批量更新策略
-// 要求旧策略和新策略数量必须一致
+// 使用事务保证原子性：所有更新操作要么全部成功，要么全部回滚
 func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines []string) error {
 	ctx = contextx.OrBackground(ctx)
 	if len(oldLines) != len(newLines) {
 		return errors.NewPolicyCountMismatchError("old and new policy counts must match")
 	}
 
-	for i, oldLine := range oldLines {
-		if err := a.UpdatePolicyWithCtx(ctx, oldLine, newLines[i]); err != nil {
-			return err
-		}
-	}
+	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+		tx := txAdapter.(*Adapter)
+		for i, oldLine := range oldLines {
+			oldRule := ParseRule(oldLine)
+			newRule := ParseRule(newLines[i])
+			if oldRule == nil || newRule == nil {
+				return errors.NewPolicyParseFailedError("invalid policy line")
+			}
 
-	return nil
+			filters := RuleToFilters(oldRule)
+			updates := make(map[string]interface{})
+			for j, val := range newRule.Values() {
+				updates[policy.PolicyFields[j]] = val
+			}
+
+			if err := tx.repo.UpdateFieldsByFilters(ctx, updates, filters...); err != nil {
+				return errors.NewPolicyUpdateFailedError(err.Error())
+			}
+		}
+		return nil
+	})
 }
 
 // UpdateFilteredPoliciesWithCtx 根据字段索引过滤后更新策略
-// 先删除匹配的旧策略，再插入新策略
+// 使用事务保证原子性：先删除匹配的旧策略，再插入新策略
+// 如果任何步骤失败，整个操作回滚
 func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []string, fieldIndex int, fieldValues ...string) error {
 	ctx = contextx.OrBackground(ctx)
 
-	// 根据字段索引构建过滤条件并删除匹配的策略
-	filters := FieldIndexToFilters(fieldIndex, fieldValues...)
-	if err := a.repo.DeleteByFilters(ctx, filters...); err != nil {
-		return errors.NewPolicyRemoveFailedError(err.Error())
-	}
+	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+		tx := txAdapter.(*Adapter)
 
-	// 插入新策略
-	rules := ParseRules(newLines)
-	if len(rules) > 0 {
-		if err := a.repo.CreateBatch(ctx, rules...); err != nil {
-			return errors.NewPolicyBatchAddFailedError(err.Error())
+		// 根据字段索引构建过滤条件并删除匹配的策略
+		filters := FieldIndexToFilters(fieldIndex, fieldValues...)
+		if err := tx.repo.DeleteByFilters(ctx, filters...); err != nil {
+			return errors.NewPolicyRemoveFailedError(err.Error())
 		}
-	}
 
-	return nil
+		// 插入新策略
+		rules := ParseRules(newLines)
+		if len(rules) > 0 {
+			if err := tx.repo.CreateBatch(ctx, rules...); err != nil {
+				return errors.NewPolicyBatchAddFailedError(err.Error())
+			}
+		}
+
+		return nil
+	})
 }
 
 // LoadFilteredPolicyWithCtx 根据过滤条件加载策略

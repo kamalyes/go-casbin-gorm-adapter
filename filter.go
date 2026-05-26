@@ -76,6 +76,16 @@ func FieldIndexToFilters(fieldIndex int, fieldValues ...string) []*repository.Fi
 	return filters
 }
 
+// FieldIndexToFiltersByPType 根据策略类型（p/g）和字段索引和值创建 repository.Filter 切片
+func FieldIndexToFiltersByPType(ptype string, fieldIndex int, fieldValues ...string) []*repository.Filter {
+	filters := make([]*repository.Filter, 0, len(fieldValues)+1)
+	if ptype != "" {
+		filters = append(filters, repository.NewEqFilter(policy.FieldPType, ptype))
+	}
+	filters = append(filters, FieldIndexToFilters(fieldIndex, fieldValues...)...)
+	return filters
+}
+
 // FieldIndexToQuery 根据字段索引和值创建 repository.Query
 // 与 FieldIndexToFilters 类似，但返回 Query 对象
 func FieldIndexToQuery(fieldIndex int, fieldValues ...string) *repository.Query {

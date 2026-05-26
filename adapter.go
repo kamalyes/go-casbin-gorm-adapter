@@ -25,11 +25,12 @@ import (
 
 // 编译时接口断言，确保 Adapter 实现了所有必需的接口
 var (
-	_ policy.Adapter              = (*Adapter)(nil) // 基础适配器接口
-	_ policy.FilteredAdapter      = (*Adapter)(nil) // 过滤适配器接口
-	_ policy.BatchAdapter         = (*Adapter)(nil) // 批量操作适配器接口
-	_ policy.UpdatableAdapter     = (*Adapter)(nil) // 可更新适配器接口
-	_ policy.TransactionalAdapter = (*Adapter)(nil) // 事务适配器接口
+	_ policy.Adapter               = (*Adapter)(nil) // 基础适配器接口
+	_ policy.FilteredAdapter       = (*Adapter)(nil) // 过滤适配器接口
+	_ policy.BatchAdapter          = (*Adapter)(nil) // 批量操作适配器接口
+	_ policy.UpdatableAdapter      = (*Adapter)(nil) // 可更新适配器接口
+	_ policy.PTypeUpdatableAdapter = (*Adapter)(nil)
+	_ policy.TransactionalAdapter  = (*Adapter)(nil) // 事务适配器接口
 )
 
 // Adapter 基于 GORM 的策略存储适配器
@@ -270,6 +271,9 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 // 如果任何步骤失败，整个操作回滚
 func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []string, fieldIndex int, fieldValues ...string) error {
 	ctx = contextx.OrBackground(ctx)
+	if ptype := policy.InferPType(newLines); ptype != "" {
+		return a.UpdateFilteredPoliciesByPTypeWithCtx(ctx, ptype, newLines, fieldIndex, fieldValues...)
+	}
 
 	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
@@ -282,6 +286,34 @@ func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []
 
 		// 插入新策略
 		rules := ParseRules(newLines)
+		if len(rules) > 0 {
+			if err := tx.repo.CreateBatch(ctx, rules...); err != nil {
+				return errors.NewPolicyBatchAddFailedError(err.Error())
+			}
+		}
+
+		return nil
+	})
+}
+
+// UpdateFilteredPoliciesByPTypeWithCtx 根据策略类型（p/g）过滤后更新策略
+// 使用事务保证原子性：先删除匹配的旧策略，再插入新策略
+// 如果任何步骤失败，整个操作回滚
+func (a *Adapter) UpdateFilteredPoliciesByPTypeWithCtx(ctx context.Context, ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
+	ctx = contextx.OrBackground(ctx)
+	if ptype == "" {
+		return a.UpdateFilteredPoliciesWithCtx(ctx, newLines, fieldIndex, fieldValues...)
+	}
+
+	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+		tx := txAdapter.(*Adapter)
+
+		filters := FieldIndexToFiltersByPType(ptype, fieldIndex, fieldValues...)
+		if err := tx.repo.DeleteByFilters(ctx, filters...); err != nil {
+			return errors.NewPolicyRemoveFailedError(err.Error())
+		}
+
+		rules := ParseRulesByPType(ptype, newLines)
 		if len(rules) > 0 {
 			if err := tx.repo.CreateBatch(ctx, rules...); err != nil {
 				return errors.NewPolicyBatchAddFailedError(err.Error())
@@ -386,6 +418,11 @@ func (a *Adapter) UpdatePolicies(oldLines, newLines []string) error {
 // UpdateFilteredPolicies 根据字段索引过滤后更新策略（无上下文）
 func (a *Adapter) UpdateFilteredPolicies(newLines []string, fieldIndex int, fieldValues ...string) error {
 	return a.UpdateFilteredPoliciesWithCtx(context.Background(), newLines, fieldIndex, fieldValues...)
+}
+
+// UpdateFilteredPoliciesByPType 根据策略类型（p/g）过滤后更新策略（无上下文）
+func (a *Adapter) UpdateFilteredPoliciesByPType(ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
+	return a.UpdateFilteredPoliciesByPTypeWithCtx(context.Background(), ptype, newLines, fieldIndex, fieldValues...)
 }
 
 // LoadFilteredPolicy 根据过滤条件加载策略（无上下文）

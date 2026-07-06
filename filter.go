@@ -13,6 +13,7 @@ package gormadapter
 
 import (
 	"github.com/kamalyes/go-casbin/policy"
+	"github.com/kamalyes/go-sqlbuilder/constants"
 	"github.com/kamalyes/go-sqlbuilder/repository"
 )
 
@@ -96,4 +97,30 @@ func FieldIndexToQuery(fieldIndex int, fieldValues ...string) *repository.Query 
 		}
 	}
 	return query
+}
+
+// RulesToOrFilterGroup 将多条策略规则转为 OR 复合 FilterGroup
+// 每条策略转为一个 AND 子组（仅非空字段精确匹配，与 RuleToFilters 语义一致），外层 OR 组合
+// 配合 BaseRepository.DeleteByFilterGroup 使用，将 N 次 DELETE 合并为 1 次
+// 空规则会被跳过；若所有规则都为空，返回空 FilterGroup（IsEmpty()=true）
+func RulesToOrFilterGroup(rules []*CasbinRule) *repository.FilterGroup {
+	orGroup := repository.NewFilterGroup(constants.LOGIC_OR)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		andGroup := repository.NewFilterGroup(constants.LOGIC_AND)
+		if rule.PType != "" {
+			andGroup.AddFilter(repository.NewEqFilter(policy.FieldPType, rule.PType))
+		}
+		for i, val := range rule.Values() {
+			if val != "" {
+				andGroup.AddFilter(repository.NewEqFilter(policy.PolicyFields[i], val))
+			}
+		}
+		if !andGroup.IsEmpty() {
+			orGroup.AddGroup(andGroup)
+		}
+	}
+	return orGroup
 }

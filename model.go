@@ -22,17 +22,17 @@ import (
 // 对应数据库中的 casbin_rule 表
 // PType 为策略类型（p=权限策略, g=角色分组），V0-V5 为策略参数
 type CasbinRule struct {
-	ID        uint           `json:"id" gorm:"primaryKey;autoIncrement"`             // 主键ID
-	PType     string         `json:"p_type" gorm:"size:128;index;comment:策略类型(p/g)"` // 策略类型
-	V0        string         `json:"v0" gorm:"size:256;comment:第1个参数"`               // 策略参数0（通常为 sub）
-	V1        string         `json:"v1" gorm:"size:256;comment:第2个参数"`               // 策略参数1（通常为 obj）
-	V2        string         `json:"v2" gorm:"size:256;comment:第3个参数"`               // 策略参数2（通常为 act）
-	V3        string         `json:"v3" gorm:"size:256;comment:第4个参数"`               // 策略参数3（通常为 eft 或 dom）
-	V4        string         `json:"v4" gorm:"size:256;comment:第5个参数"`               // 策略参数4
-	V5        string         `json:"v5" gorm:"size:256;comment:第6个参数"`               // 策略参数5
-	CreatedAt time.Time      `json:"created_at" gorm:"autoCreateTime"`               // 创建时间
-	UpdatedAt time.Time      `json:"updated_at" gorm:"autoUpdateTime"`               // 更新时间
-	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`              // 软删除时间
+	ID        uint           `json:"id" gorm:"primaryKey;autoIncrement"`                           // 主键ID
+	PType     string         `json:"p_type" gorm:"size:128;index:idx_casbin_rule,priority:1;comment:策略类型(p/g)"` // 策略类型（复合索引第1列）
+	V0        string         `json:"v0" gorm:"size:256;index:idx_casbin_rule,priority:2;comment:第1个参数"`         // 策略参数0（通常为 sub，复合索引第2列）
+	V1        string         `json:"v1" gorm:"size:256;index:idx_casbin_rule,priority:3;comment:第2个参数"`         // 策略参数1（通常为 obj，复合索引第3列）
+	V2        string         `json:"v2" gorm:"size:256;index:idx_casbin_rule,priority:4;comment:第3个参数"`         // 策略参数2（通常为 act，复合索引第4列）
+	V3        string         `json:"v3" gorm:"size:256;comment:第4个参数"`                                           // 策略参数3（通常为 eft 或 dom）
+	V4        string         `json:"v4" gorm:"size:256;comment:第5个参数"`                                           // 策略参数4
+	V5        string         `json:"v5" gorm:"size:256;comment:第6个参数"`                                           // 策略参数5
+	CreatedAt time.Time      `json:"created_at" gorm:"autoCreateTime"`                                           // 创建时间
+	UpdatedAt time.Time      `json:"updated_at" gorm:"autoUpdateTime"`                                           // 更新时间
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`                                          // 软删除时间
 }
 
 // TableName 返回数据库表名

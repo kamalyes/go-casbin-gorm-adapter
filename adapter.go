@@ -115,22 +115,22 @@ func (a *Adapter) LoadPolicyWithCtx(ctx context.Context) ([]string, error) {
 // SavePolicyWithCtx 将所有策略保存到数据库（先清空再写入）
 func (a *Adapter) SavePolicyWithCtx(ctx context.Context, policies []string) error {
 	ctx = contextx.OrBackground(ctx)
-
-	// 先清空所有现有策略
-	if err := a.clearAll(ctx); err != nil {
-		return errors.NewPolicyClearFailedError(err.Error())
-	}
-
-	// 解析并批量写入新策略
 	rules := ParseRules(policies)
-	if len(rules) > 0 {
-		if err := a.repo.CreateBatch(ctx, rules...); err != nil {
-			return errors.NewPolicySaveFailedError(err.Error())
-		}
-	}
 
-	a.logger.InfoKV("Policies saved to database", "count", len(rules))
-	return nil
+	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+		tx := txAdapter.(*Adapter)
+		// 先清空所有现有策略
+		if err := tx.clearAll(ctx); err != nil {
+			return errors.NewPolicyClearFailedError(err.Error())
+		}
+		// 批量写入新策略
+		if len(rules) > 0 {
+			if err := tx.repo.CreateBatch(ctx, rules...); err != nil {
+				return errors.NewPolicySaveFailedError(err.Error())
+			}
+		}
+		return nil
+	})
 }
 
 // AddPolicyWithCtx 向数据库添加单条策略
@@ -191,18 +191,21 @@ func (a *Adapter) RemovePoliciesWithCtx(ctx context.Context, lines []string) err
 		return nil
 	}
 
+	rules := ParseRules(lines)
+	if len(rules) == 0 {
+		return nil
+	}
+
+	orGroup := RulesToOrFilterGroup(rules)
+	if orGroup.IsEmpty() {
+		return nil
+	}
+
 	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
-		for _, line := range lines {
-			rule := ParseRule(line)
-			if rule == nil {
-				continue
-			}
-
-			filters := RuleToFilters(rule)
-			if err := tx.repo.DeleteByFilters(ctx, filters...); err != nil {
-				return errors.NewPolicyBatchRemoveFailedError(err.Error())
-			}
+		// 批量删除策略（单条 OR 条件 DELETE，复用 BaseRepository.DeleteByFilterGroup）
+		if err := tx.repo.DeleteByFilterGroup(ctx, orGroup); err != nil {
+			return errors.NewPolicyBatchRemoveFailedError(err.Error())
 		}
 		return nil
 	})
@@ -242,25 +245,28 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 	if len(oldLines) != len(newLines) {
 		return errors.NewPolicyCountMismatchError("old and new policy counts must match")
 	}
+	if len(oldLines) == 0 {
+		return nil
+	}
+
+	oldRules := ParseRules(oldLines)
+	newRules := ParseRules(newLines)
+	if len(oldRules) != len(oldLines) || len(newRules) != len(newLines) {
+		return errors.NewPolicyParseFailedError("invalid policy line")
+	}
 
 	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
-		for i, oldLine := range oldLines {
-			oldRule := ParseRule(oldLine)
-			newRule := ParseRule(newLines[i])
-			if oldRule == nil || newRule == nil {
-				return errors.NewPolicyParseFailedError("invalid policy line")
+		// 批量删除旧策略（单条 OR 条件 DELETE，复用 BaseRepository.DeleteByFilterGroup）
+		orGroup := RulesToOrFilterGroup(oldRules)
+		if !orGroup.IsEmpty() {
+			if err := tx.repo.DeleteByFilterGroup(ctx, orGroup); err != nil {
+				return errors.NewPolicyBatchRemoveFailedError(err.Error())
 			}
-
-			filters := RuleToFilters(oldRule)
-			updates := make(map[string]interface{})
-			for j, val := range newRule.Values() {
-				updates[policy.PolicyFields[j]] = val
-			}
-
-			if err := tx.repo.UpdateFieldsByFilters(ctx, updates, filters...); err != nil {
-				return errors.NewPolicyUpdateFailedError(err.Error())
-			}
+		}
+		// 批量插入新策略（1 次 INSERT batch）
+		if err := tx.repo.CreateBatch(ctx, newRules...); err != nil {
+			return errors.NewPolicyBatchAddFailedError(err.Error())
 		}
 		return nil
 	})

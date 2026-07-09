@@ -37,12 +37,23 @@ var (
 // 支持 MySQL、PostgreSQL、SQLite 等关系型数据库
 // 通过 go-sqlbuilder 的 BaseRepository 实现数据库 CRUD 操作
 type Adapter struct {
-	handler     db.Handler                             // 数据库处理器，封装 GORM DB 实例
-	repo        *repository.BaseRepository[CasbinRule] // 基于 go-sqlbuilder 的仓储层
-	logger      logger.ILogger                         // 日志记录器
-	filtered    bool                                   // 是否已使用过滤加载
-	tableName   string                                 // 数据库表名
-	autoMigrate bool                                   // 是否自动迁移表结构
+	handler       db.Handler                             // 数据库处理器，封装 GORM DB 实例
+	repo          *repository.BaseRepository[CasbinRule] // 基于 go-sqlbuilder 的仓储层
+	logger        logger.ILogger                         // 日志记录器
+	filtered      bool                                   // 是否已使用过滤加载
+	tableName     string                                 // 数据库表名
+	autoMigrate   bool                                   // 是否自动迁移表结构
+	txCtx         context.Context                        // 事务上下文，ExecuteInTransaction 内设置，供非 ctx 方法继承使用
+	inTransaction bool                                   // 是否已处于数据库事务中（作为 txAdapter 创建时为 true）
+}
+
+// defaultCtx 返回适配器当前应使用的上下文
+// 处于事务中时返回事务上下文（支持取消和链路追踪），否则返回 context.Background()
+func (a *Adapter) defaultCtx() context.Context {
+	if a.txCtx != nil {
+		return a.txCtx
+	}
+	return context.Background()
 }
 
 // NewAdapter 创建 GORM 适配器
@@ -378,62 +389,63 @@ func (a *Adapter) CountWithCtx(ctx context.Context, filter *policy.Filter) (int6
 }
 
 // ==================== 非 ctx 方法（包装 WithCtx） ====================
-// 非 ctx 方法内部调用对应的 WithCtx 方法，使用 context.Background() 作为默认上下文
-// 用户可以直接调用 WithCtx 方法传入自定义 context 实现超时控制和链路追踪
+// 非 ctx 方法内部调用对应的 WithCtx 方法
+// 处于事务中时（txCtx 已设置）继承事务上下文，使取消信号和 trace-id 透传到子操作
+// 否则使用 context.Background() 作为默认上下文
 
 // LoadPolicy 从数据库加载所有策略（无上下文）
 func (a *Adapter) LoadPolicy() ([]string, error) {
-	return a.LoadPolicyWithCtx(context.Background())
+	return a.LoadPolicyWithCtx(a.defaultCtx())
 }
 
 // SavePolicy 保存所有策略到数据库（无上下文）
 func (a *Adapter) SavePolicy(policies []string) error {
-	return a.SavePolicyWithCtx(context.Background(), policies)
+	return a.SavePolicyWithCtx(a.defaultCtx(), policies)
 }
 
 // AddPolicy 添加单条策略（无上下文）
 func (a *Adapter) AddPolicy(line string) error {
-	return a.AddPolicyWithCtx(context.Background(), line)
+	return a.AddPolicyWithCtx(a.defaultCtx(), line)
 }
 
 // RemovePolicy 删除单条策略（无上下文）
 func (a *Adapter) RemovePolicy(line string) error {
-	return a.RemovePolicyWithCtx(context.Background(), line)
+	return a.RemovePolicyWithCtx(a.defaultCtx(), line)
 }
 
 // AddPolicies 批量添加策略（无上下文）
 func (a *Adapter) AddPolicies(lines []string) error {
-	return a.AddPoliciesWithCtx(context.Background(), lines)
+	return a.AddPoliciesWithCtx(a.defaultCtx(), lines)
 }
 
 // RemovePolicies 批量删除策略（无上下文）
 func (a *Adapter) RemovePolicies(lines []string) error {
-	return a.RemovePoliciesWithCtx(context.Background(), lines)
+	return a.RemovePoliciesWithCtx(a.defaultCtx(), lines)
 }
 
 // UpdatePolicy 更新单条策略（无上下文）
 func (a *Adapter) UpdatePolicy(oldLine, newLine string) error {
-	return a.UpdatePolicyWithCtx(context.Background(), oldLine, newLine)
+	return a.UpdatePolicyWithCtx(a.defaultCtx(), oldLine, newLine)
 }
 
 // UpdatePolicies 批量更新策略（无上下文）
 func (a *Adapter) UpdatePolicies(oldLines, newLines []string) error {
-	return a.UpdatePoliciesWithCtx(context.Background(), oldLines, newLines)
+	return a.UpdatePoliciesWithCtx(a.defaultCtx(), oldLines, newLines)
 }
 
 // UpdateFilteredPolicies 根据字段索引过滤后更新策略（无上下文）
 func (a *Adapter) UpdateFilteredPolicies(newLines []string, fieldIndex int, fieldValues ...string) error {
-	return a.UpdateFilteredPoliciesWithCtx(context.Background(), newLines, fieldIndex, fieldValues...)
+	return a.UpdateFilteredPoliciesWithCtx(a.defaultCtx(), newLines, fieldIndex, fieldValues...)
 }
 
 // UpdateFilteredPoliciesByPType 根据策略类型（p/g）过滤后更新策略（无上下文）
 func (a *Adapter) UpdateFilteredPoliciesByPType(ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
-	return a.UpdateFilteredPoliciesByPTypeWithCtx(context.Background(), ptype, newLines, fieldIndex, fieldValues...)
+	return a.UpdateFilteredPoliciesByPTypeWithCtx(a.defaultCtx(), ptype, newLines, fieldIndex, fieldValues...)
 }
 
 // LoadFilteredPolicy 根据过滤条件加载策略（无上下文）
 func (a *Adapter) LoadFilteredPolicy(filter interface{}) ([]string, error) {
-	return a.LoadFilteredPolicyWithCtx(context.Background(), filter)
+	return a.LoadFilteredPolicyWithCtx(a.defaultCtx(), filter)
 }
 
 // IsFiltered 返回是否已使用过滤加载
@@ -443,17 +455,17 @@ func (a *Adapter) IsFiltered() bool {
 
 // RemoveFilteredPolicy 根据字段索引和值删除匹配的策略（无上下文）
 func (a *Adapter) RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) error {
-	return a.RemoveFilteredPolicyWithCtx(context.Background(), fieldIndex, fieldValues...)
+	return a.RemoveFilteredPolicyWithCtx(a.defaultCtx(), fieldIndex, fieldValues...)
 }
 
 // GetPolicyByPType 根据策略类型加载策略（无上下文）
 func (a *Adapter) GetPolicyByPType(ptype string) ([]string, error) {
-	return a.GetPolicyByPTypeWithCtx(context.Background(), ptype)
+	return a.GetPolicyByPTypeWithCtx(a.defaultCtx(), ptype)
 }
 
 // Count 统计匹配过滤条件的策略数量（无上下文）
 func (a *Adapter) Count(filter *policy.Filter) (int64, error) {
-	return a.CountWithCtx(context.Background(), filter)
+	return a.CountWithCtx(a.defaultCtx(), filter)
 }
 
 // ==================== 辅助方法 ====================
@@ -499,7 +511,17 @@ func (a *Adapter) WithTransaction(fn func(tx *gorm.DB) error) error {
 // 在数据库事务中执行回调函数，确保多个适配器操作的原子性
 // 如果事务中任何操作失败，所有操作都会回滚
 func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapter) error) error {
-	return a.handler.GetDB().Transaction(func(tx *gorm.DB) error {
+	// 快速失败：上下文已取消时不再开启事务，避免 driver: bad connection 等级联错误
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// 已在事务中（作为 txAdapter 被调用）：直接复用当前事务，不再开 SAVEPOINT
+	// 避免嵌套 SAVEPOINT 带来的额外往返和坏连接风险
+	if a.inTransaction {
+		return fn(a)
+	}
+	// WithContext 将上下文绑定到事务，使 GORM 能感知取消并主动中止连接
+	return a.handler.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txAdapter, err := NewAdapter(db.MustNewGormHandler(tx),
 			WithTableName(a.tableName),
 			WithLogger(a.logger),
@@ -508,6 +530,10 @@ func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapt
 		if err != nil {
 			return err
 		}
+		// 标记为已在事务中，使后续 ExecuteInTransaction 调用直接复用此事务
+		txAdapter.inTransaction = true
+		// 传播事务上下文，使 txAdapter 的非 ctx 方法（被 policy 层调用）也能继承取消信号和 trace-id
+		txAdapter.txCtx = ctx
 		return fn(txAdapter)
 	})
 }

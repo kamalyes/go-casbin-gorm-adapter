@@ -520,8 +520,13 @@ func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapt
 	if a.inTransaction {
 		return fn(a)
 	}
-	// WithContext 将上下文绑定到事务，使 GORM 能感知取消并主动中止连接
-	return a.handler.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// 使用 WithoutCancel 防止 database/sql 在 ctx 取消时自动回滚事务
+	// 原因：database/sql 的 BeginTx 会启动 awaitDone goroutine 监听 ctx，
+	// ctx 取消时自动 Rollback，但此时回调可能仍在执行 → "transaction has already been committed or rolled back"
+	// WithoutCancel 保留 trace-id 等值（用于日志），但不传播取消信号（由顶部 ctx.Err() 检查负责）
+	// 事务仍会在回调返回后由 GORM 正常提交/回滚
+	txCtx := context.WithoutCancel(ctx)
+	return a.handler.GetDB().WithContext(txCtx).Transaction(func(tx *gorm.DB) error {
 		txAdapter, err := NewAdapter(db.MustNewGormHandler(tx),
 			WithTableName(a.tableName),
 			WithLogger(a.logger),
@@ -532,8 +537,8 @@ func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapt
 		}
 		// 标记为已在事务中，使后续 ExecuteInTransaction 调用直接复用此事务
 		txAdapter.inTransaction = true
-		// 传播事务上下文，使 txAdapter 的非 ctx 方法（被 policy 层调用）也能继承取消信号和 trace-id
-		txAdapter.txCtx = ctx
+		// 传播事务上下文（WithoutCancel），使 txAdapter 的非 ctx 方法也能继承 trace-id
+		txAdapter.txCtx = txCtx
 		return fn(txAdapter)
 	})
 }

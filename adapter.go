@@ -13,6 +13,9 @@ package gormadapter
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/kamalyes/go-casbin/errors"
 	"github.com/kamalyes/go-casbin/policy"
@@ -21,6 +24,7 @@ import (
 	"github.com/kamalyes/go-sqlbuilder/repository"
 	"github.com/kamalyes/go-toolbox/pkg/contextx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 // 编译时接口断言，确保 Adapter 实现了所有必需的接口
@@ -127,8 +131,9 @@ func (a *Adapter) LoadPolicyWithCtx(ctx context.Context) ([]string, error) {
 func (a *Adapter) SavePolicyWithCtx(ctx context.Context, policies []string) error {
 	ctx = contextx.OrBackground(ctx)
 	rules := ParseRules(policies)
+	a.logger.DebugContextKV(ctx, "Casbin savePolicy start", "table", a.tableName, "count", len(policies))
 
-	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+	err := a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
 		// 先清空所有现有策略
 		if err := tx.clearAll(ctx); err != nil {
@@ -142,6 +147,11 @@ func (a *Adapter) SavePolicyWithCtx(ctx context.Context, policies []string) erro
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	a.logger.DebugContextKV(ctx, "Casbin savePolicy done", "table", a.tableName, "count", len(policies))
+	return nil
 }
 
 // AddPolicyWithCtx 向数据库添加单条策略
@@ -156,7 +166,7 @@ func (a *Adapter) AddPolicyWithCtx(ctx context.Context, line string) error {
 		return errors.NewPolicyAddFailedError(err.Error())
 	}
 
-	a.logger.DebugKV("Policy added to database", "policy", line)
+	a.logger.DebugContextKV(ctx, "Policy added to database", "policy", line)
 	return nil
 }
 
@@ -174,7 +184,7 @@ func (a *Adapter) RemovePolicyWithCtx(ctx context.Context, line string) error {
 		return errors.NewPolicyRemoveFailedError(err.Error())
 	}
 
-	a.logger.DebugKV("Policy removed from database", "policy", line)
+	a.logger.DebugContextKV(ctx, "Policy removed from database", "policy", line)
 	return nil
 }
 
@@ -190,7 +200,7 @@ func (a *Adapter) AddPoliciesWithCtx(ctx context.Context, lines []string) error 
 		return errors.NewPolicyBatchAddFailedError(err.Error())
 	}
 
-	a.logger.DebugKV("Policies batch added to database", "count", len(rules))
+	a.logger.DebugContextKV(ctx, "Policies batch added to database", "count", len(rules))
 	return nil
 }
 
@@ -245,7 +255,7 @@ func (a *Adapter) UpdatePolicyWithCtx(ctx context.Context, oldLine, newLine stri
 		return errors.NewPolicyUpdateFailedError(err.Error())
 	}
 
-	a.logger.DebugKV("Policy updated in database", "old", oldLine, "new", newLine)
+	a.logger.DebugContextKV(ctx, "Policy updated in database", "old", oldLine, "new", newLine)
 	return nil
 }
 
@@ -265,8 +275,9 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 	if len(oldRules) != len(oldLines) || len(newRules) != len(newLines) {
 		return errors.NewPolicyParseFailedError("invalid policy line")
 	}
+	a.logger.DebugContextKV(ctx, "Casbin updatePolicies start", "table", a.tableName, "count", len(oldRules))
 
-	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+	err := a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
 		// 批量删除旧策略（单条 OR 条件 DELETE，复用 BaseRepository.DeleteByFilterGroup）
 		orGroup := RulesToOrFilterGroup(oldRules)
@@ -281,6 +292,11 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	a.logger.DebugContextKV(ctx, "Casbin updatePolicies done", "table", a.tableName, "count", len(newRules))
+	return nil
 }
 
 // UpdateFilteredPoliciesWithCtx 根据字段索引过滤后更新策略
@@ -291,8 +307,9 @@ func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []
 	if ptype := policy.InferPType(newLines); ptype != "" {
 		return a.UpdateFilteredPoliciesByPTypeWithCtx(ctx, ptype, newLines, fieldIndex, fieldValues...)
 	}
+	a.logger.DebugContextKV(ctx, "Casbin updateFilteredPolicies start", "table", a.tableName, "fieldIndex", fieldIndex, "count", len(newLines))
 
-	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+	err := a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
 
 		// 根据字段索引构建过滤条件并删除匹配的策略
@@ -311,6 +328,11 @@ func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	a.logger.DebugContextKV(ctx, "Casbin updateFilteredPolicies done", "table", a.tableName, "fieldIndex", fieldIndex, "count", len(newLines))
+	return nil
 }
 
 // UpdateFilteredPoliciesByPTypeWithCtx 根据策略类型（p/g）过滤后更新策略
@@ -321,8 +343,9 @@ func (a *Adapter) UpdateFilteredPoliciesByPTypeWithCtx(ctx context.Context, ptyp
 	if ptype == "" {
 		return a.UpdateFilteredPoliciesWithCtx(ctx, newLines, fieldIndex, fieldValues...)
 	}
+	a.logger.DebugContextKV(ctx, "Casbin updateFilteredPoliciesByPType start", "table", a.tableName, "ptype", ptype, "fieldIndex", fieldIndex, "count", len(newLines))
 
-	return a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
+	err := a.ExecuteInTransaction(ctx, func(txAdapter policy.Adapter) error {
 		tx := txAdapter.(*Adapter)
 
 		filters := FieldIndexToFiltersByPType(ptype, fieldIndex, fieldValues...)
@@ -339,6 +362,11 @@ func (a *Adapter) UpdateFilteredPoliciesByPTypeWithCtx(ctx context.Context, ptyp
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	a.logger.DebugContextKV(ctx, "Casbin updateFilteredPoliciesByPType done", "table", a.tableName, "ptype", ptype, "fieldIndex", fieldIndex, "count", len(newLines))
+	return nil
 }
 
 // LoadFilteredPolicyWithCtx 根据过滤条件加载策略
@@ -354,7 +382,7 @@ func (a *Adapter) LoadFilteredPolicyWithCtx(ctx context.Context, filter interfac
 	}
 
 	policies := RulesToStrings(rules)
-	a.logger.InfoKV("Filtered policies loaded from database", "count", len(policies))
+	a.logger.InfoContextKV(ctx, "Filtered policies loaded from database", "count", len(policies))
 	return policies, nil
 }
 
@@ -366,7 +394,7 @@ func (a *Adapter) RemoveFilteredPolicyWithCtx(ctx context.Context, fieldIndex in
 		return errors.NewPolicyRemoveFailedError(err.Error())
 	}
 
-	a.logger.DebugKV("Filtered policies removed from database", "fieldIndex", fieldIndex)
+	a.logger.DebugContextKV(ctx, "Filtered policies removed from database", "fieldIndex", fieldIndex)
 	return nil
 }
 
@@ -487,7 +515,171 @@ func (a *Adapter) buildFilterQuery(filter interface{}) *repository.Query {
 // 使用原生 SQL 确保彻底清空（包括软删除的记录）
 func (a *Adapter) clearAll(ctx context.Context) error {
 	gormDB := a.handler.GetDB()
-	return gormDB.Table(a.tableName).Where("1 = 1").Delete(&CasbinRule{}).Error
+	result := gormDB.Table(a.tableName).Where("1 = 1").Delete(&CasbinRule{})
+	if result.Error != nil {
+		a.logger.DebugContextKV(ctx, "Casbin clearAll failed", "table", a.tableName, "error", result.Error.Error())
+		return result.Error
+	}
+	a.logger.DebugContextKV(ctx, "Casbin clearAll done", "table", a.tableName, "rows", result.RowsAffected)
+	return nil
+}
+
+// syncTableIndexes 检测指定表上模型定义的索引与数据库实际索引的差异
+// 当显式命名的索引缺失、或列/顺序/唯一性不一致时，自动重建（先删后建）
+// 解决 GORM AutoMigrate 不会更新已存在索引的问题，确保旧库索引与模型保持一致
+//
+// 这是一个独立的包级函数，无需创建完整 Adapter 即可对已存在的分片表执行索引同步，
+// 适用于服务冷启动时扫描所有 casbin_rule_* 表批量同步索引的场景
+//
+// 匹配策略：
+//  1. 按索引名匹配：若名字一致且定义一致则跳过；名字一致但定义不一致则 Drop+Create
+//  2. 按列匹配：名字不一致但列与唯一性完全一致（如 gorm:"index" 自动命名的索引，
+//     其名字依赖动态表名，与 ParseIndexes 基于 model.TableName 生成的名字不同），
+//     视为已存在等效索引，跳过避免重复创建
+//  3. 完全不存在则 CreateIndex
+func syncTableIndexes(ctx context.Context, gormDB *gorm.DB, tableName string, log logger.ILogger) error {
+	// 使用 Table() 指定动态表名，使 migrator 操作作用于实际分片表
+	migrator := gormDB.Table(tableName).Migrator()
+
+	// 解析模型获取索引定义
+	stmt := &gorm.Statement{DB: gormDB}
+	if err := stmt.Parse(&CasbinRule{}); err != nil {
+		return fmt.Errorf("parse casbin rule model failed: %w", err)
+	}
+
+	return syncIndexesCore(ctx, migrator, stmt, tableName, log)
+}
+
+// SyncAllShardIndexes 扫描数据库中所有以 tablePrefix 开头的分片表，并对每张表执行索引同步
+// 适用于服务冷启动时批量预热所有已存在的分片表索引，避免懒加载导致的索引同步延迟
+//
+// 该函数是 go-casbin-gorm-adapter 提供的自包含能力，调用方只需传入 DB、表名前缀和日志器即可，
+// 无需在业务/基础设施层编写 GetTables、过滤、循环、统计等扫描逻辑
+//
+// tablePrefix: 分片表名前缀（如 "casbin_rule_"），仅处理以此开头的表
+// 单张表同步失败不会中断整体流程，仅记录警告日志；返回的 error 仅表示致命错误（列举表失败或 ctx 取消）
+func SyncAllShardIndexes(ctx context.Context, gormDB *gorm.DB, tablePrefix string, log logger.ILogger) error {
+	tables, err := gormDB.Migrator().GetTables()
+	if err != nil {
+		return fmt.Errorf("list tables for shard index sync failed: %w", err)
+	}
+
+	var synced, failed, skipped int
+	for _, table := range tables {
+		// 仅处理匹配前缀的分片表，跳过其他业务表
+		if !strings.HasPrefix(table, tablePrefix) {
+			skipped++
+			continue
+		}
+		// 响应上下文取消，避免冷启动期间被中断时长时间阻塞
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := syncTableIndexes(ctx, gormDB, table, log); err != nil {
+			log.WarnContextKV(ctx, "Sync shard index failed, skipped", "table", table, "error", err.Error())
+			failed++
+			continue
+		}
+		synced++
+	}
+	log.InfoContextKV(ctx, "Shard indexes sync completed", "synced", synced, "failed", failed, "skipped", skipped)
+	return nil
+}
+
+// indexMigrator 抽象索引迁移所需的三个操作，便于测试注入 mock 覆盖错误分支
+type indexMigrator interface {
+	GetIndexes(dst interface{}) ([]gorm.Index, error)
+	DropIndex(dst interface{}, name string) error
+	CreateIndex(dst interface{}, name string) error
+}
+
+// syncIndexesCore 执行索引差异检测与重建的核心逻辑
+// 从 syncTableIndexes 拆出，接受 indexMigrator 接口以便测试注入 mock 覆盖所有错误分支
+func syncIndexesCore(ctx context.Context, migrator indexMigrator, stmt *gorm.Statement, tableName string, log logger.ILogger) error {
+	// 获取数据库实际索引
+	dbIndexes, err := migrator.GetIndexes(&CasbinRule{})
+	if err != nil {
+		return fmt.Errorf("get indexes of %s failed: %w", tableName, err)
+	}
+
+	for _, modelIndex := range stmt.Schema.ParseIndexes() {
+		expectedCols := modelIndexColumns(modelIndex)
+		expectedUnique := modelIndex.Class == "UNIQUE"
+
+		// 1) 按名匹配
+		var nameMatched gorm.Index
+		for _, di := range dbIndexes {
+			if di.Name() == modelIndex.Name {
+				nameMatched = di
+				break
+			}
+		}
+		if nameMatched != nil {
+			if indexDefEqual(nameMatched, expectedCols, expectedUnique) {
+				continue
+			}
+			// 名字一致但定义变更：先删后建
+			if err := migrator.DropIndex(&CasbinRule{}, modelIndex.Name); err != nil {
+				return fmt.Errorf("drop index %s on %s failed: %w", modelIndex.Name, tableName, err)
+			}
+			if err := migrator.CreateIndex(&CasbinRule{}, modelIndex.Name); err != nil {
+				return fmt.Errorf("create index %s on %s failed: %w", modelIndex.Name, tableName, err)
+			}
+			log.InfoContextKV(ctx, "Casbin index synced", "table", tableName, "name", modelIndex.Name, "reason", "definition changed")
+			continue
+		}
+
+		// 2) 名不匹配，按列匹配（处理自动命名索引名依赖表名的情况）
+		var colMatched gorm.Index
+		for _, di := range dbIndexes {
+			if indexDefEqual(di, expectedCols, expectedUnique) {
+				colMatched = di
+				break
+			}
+		}
+		if colMatched != nil {
+			// 已存在等效索引（名字不同），跳过避免重复创建
+			continue
+		}
+
+		// 3) 完全不存在，创建
+		if err := migrator.CreateIndex(&CasbinRule{}, modelIndex.Name); err != nil {
+			return fmt.Errorf("create index %s on %s failed: %w", modelIndex.Name, tableName, err)
+		}
+		log.InfoContextKV(ctx, "Casbin index synced", "table", tableName, "name", modelIndex.Name, "reason", "missing")
+	}
+	return nil
+}
+
+// modelIndexColumns 返回模型索引的列名（按 tag 中的 priority 升序排序）
+func modelIndexColumns(modelIndex *schema.Index) []string {
+	fields := append([]schema.IndexOption(nil), modelIndex.Fields...)
+	sort.SliceStable(fields, func(i, j int) bool {
+		return fields[i].Priority < fields[j].Priority
+	})
+	cols := make([]string, len(fields))
+	for i, f := range fields {
+		cols[i] = f.DBName
+	}
+	return cols
+}
+
+// indexDefEqual 判断数据库索引是否与期望的列顺序和唯一性一致
+// 驱动不支持唯一性查询时（ok=false）跳过唯一性对比，仅对比列
+func indexDefEqual(dbIdx gorm.Index, expectedCols []string, expectedUnique bool) bool {
+	dbCols := dbIdx.Columns()
+	if len(dbCols) != len(expectedCols) {
+		return false
+	}
+	for i, c := range expectedCols {
+		if c != dbCols[i] {
+			return false
+		}
+	}
+	if dbUnique, ok := dbIdx.Unique(); ok && dbUnique != expectedUnique {
+		return false
+	}
+	return true
 }
 
 // Close 关闭适配器（GORM 适配器无需特殊关闭操作）

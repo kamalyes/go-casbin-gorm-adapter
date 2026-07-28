@@ -20,6 +20,7 @@ import (
 	"github.com/kamalyes/go-casbin/errors"
 	"github.com/kamalyes/go-casbin/policy"
 	"github.com/kamalyes/go-logger"
+	"github.com/kamalyes/go-sqlbuilder/constants"
 	"github.com/kamalyes/go-sqlbuilder/db"
 	"github.com/kamalyes/go-sqlbuilder/repository"
 	"github.com/kamalyes/go-toolbox/pkg/contextx"
@@ -538,8 +539,13 @@ func (a *Adapter) clearAll(ctx context.Context) error {
 //     视为已存在等效索引，跳过避免重复创建
 //  3. 完全不存在则 CreateIndex
 func syncTableIndexes(ctx context.Context, gormDB *gorm.DB, tableName string, log logger.ILogger) error {
-	// 使用 Table() 指定动态表名，使 migrator 操作作用于实际分片表
-	migrator := gormDB.Table(tableName).Migrator()
+	// 使用 tableScopedMigrator 包装 GORM Migrator，覆盖 DropIndex 使用 table-scoped 语法
+	// 解决 CockroachDB 多分表同名索引 DROP INDEX ambiguous 问题
+	migrator := &tableScopedMigrator{
+		Migrator:  gormDB.Table(tableName).Migrator(),
+		gormDB:    gormDB,
+		tableName: tableName,
+	}
 
 	// 解析模型获取索引定义
 	stmt := &gorm.Statement{DB: gormDB}
@@ -548,6 +554,42 @@ func syncTableIndexes(ctx context.Context, gormDB *gorm.DB, tableName string, lo
 	}
 
 	return syncIndexesCore(ctx, migrator, stmt, tableName, log)
+}
+
+// tableScopedMigrator 包装 GORM Migrator，覆盖 DropIndex 生成 table-scoped SQL
+// GORM PostgreSQL 驱动的 DropIndex 生成 "DROP INDEX name"（不带表名），
+// CockroachDB 多分表共用同名索引时报 ambiguous 错误。
+// 此 wrapper 按 dialect 直接生成正确的 table-scoped DROP INDEX 语句。
+type tableScopedMigrator struct {
+	gorm.Migrator
+	gormDB    *gorm.DB
+	tableName string
+}
+
+func (m *tableScopedMigrator) DropIndex(dst interface{}, name string) error {
+	// 从模型 schema 解析出实际索引名
+	stmt := &gorm.Statement{DB: m.gormDB}
+	if stmt.Parse(dst) == nil {
+		if idx := stmt.Schema.LookIndex(name); idx != nil {
+			name = idx.Name
+		}
+	}
+
+	dialector := m.gormDB.Dialector.Name()
+	var sql string
+	switch {
+	case constants.IsClickHouseDialector(dialector):
+		sql = fmt.Sprintf(`ALTER TABLE "%s" DROP INDEX IF EXISTS "%s"`, m.tableName, name)
+	case constants.IsSQLiteDialector(dialector):
+		sql = fmt.Sprintf(`DROP INDEX IF EXISTS "%s"`, name)
+	case constants.IsMySQLDialector(dialector):
+		sql = fmt.Sprintf(`DROP INDEX IF EXISTS "%s" ON "%s"`, name, m.tableName)
+	default:
+		// CockroachDB: table@index 语法（table-scoped，避免多表同名索引歧义）
+		// 标准 PostgreSQL 不允许同名索引，不会走到这里
+		sql = fmt.Sprintf(`DROP INDEX IF EXISTS "%s"@"%s"`, m.tableName, name)
+	}
+	return m.gormDB.Exec(sql).Error
 }
 
 // SyncAllShardIndexes 扫描数据库中所有以 tablePrefix 开头的分片表，并对每张表执行索引同步

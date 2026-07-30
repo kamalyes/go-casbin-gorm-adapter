@@ -513,7 +513,7 @@ func (a *Adapter) buildFilterQuery(filter interface{}) *repository.Query {
 }
 
 // clearAll 清空数据库中所有策略记录
-// 使用原生 SQL 确保彻底清空（包括软删除的记录）
+// CasbinRule 不使用软删除，Delete 即硬删，直接清空整表数据
 func (a *Adapter) clearAll(ctx context.Context) error {
 	gormDB := a.handler.GetDB()
 	result := gormDB.Table(a.tableName).Where("1 = 1").Delete(&CasbinRule{})

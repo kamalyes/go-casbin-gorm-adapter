@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/kamalyes/go-casbin v0.1.6
+	github.com/kamalyes/go-casbin v0.1.7
 	github.com/kamalyes/go-logger v0.5.5
 	github.com/kamalyes/go-sqlbuilder v0.5.9
 	github.com/kamalyes/go-toolbox v0.15.6

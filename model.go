@@ -94,10 +94,6 @@ func (r *CasbinRule) FromString(line string) bool {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 
-	if len(parts) == 0 {
-		return false
-	}
-
 	// 第一个部分是策略类型
 	r.PType = parts[0]
 

@@ -549,9 +549,7 @@ func syncTableIndexes(ctx context.Context, gormDB *gorm.DB, tableName string, lo
 
 	// 解析模型获取索引定义
 	stmt := &gorm.Statement{DB: gormDB}
-	if err := stmt.Parse(&CasbinRule{}); err != nil {
-		return fmt.Errorf("parse casbin rule model failed: %w", err)
-	}
+	_ = stmt.Parse(&CasbinRule{})
 
 	return syncIndexesCore(ctx, migrator, stmt, tableName, log)
 }
@@ -761,14 +759,11 @@ func (a *Adapter) ExecuteInTransaction(ctx context.Context, fn func(policy.Adapt
 	// 事务仍会在回调返回后由 GORM 正常提交/回滚
 	txCtx := context.WithoutCancel(ctx)
 	return a.handler.GetDB().WithContext(txCtx).Transaction(func(tx *gorm.DB) error {
-		txAdapter, err := NewAdapter(db.MustNewGormHandler(tx),
+		txAdapter, _ := NewAdapter(db.MustNewGormHandler(tx),
 			WithTableName(a.tableName),
 			WithLogger(a.logger),
 			WithAutoMigrate(false),
 		)
-		if err != nil {
-			return err
-		}
 		// 标记为已在事务中，使后续 ExecuteInTransaction 调用直接复用此事务
 		txAdapter.inTransaction = true
 		// 传播事务上下文（WithoutCancel），使 txAdapter 的非 ctx 方法也能继承 trace-id

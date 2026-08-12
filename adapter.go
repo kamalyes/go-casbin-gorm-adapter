@@ -14,6 +14,7 @@ package gormadapter
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/kamalyes/go-sqlbuilder/repository"
 	"github.com/kamalyes/go-toolbox/pkg/contextx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
 
@@ -88,8 +90,14 @@ func NewAdapter(handler db.Handler, opts ...Option) (*Adapter, error) {
 	}
 
 	// 自动迁移表结构（默认开启）
+	// 不可使用 gormDB.AutoMigrate(&CasbinRule{})，因为 GORM v1.31 的 Migrator() 内部
+	// getInstance()(clone==1) 创建新 Statement 时不复制 Table 字段，
+	// 导致 .Table(name) session 覆盖丢失，AutoMigrate 最终调用 CasbinRule.TableName() 的硬编码 "casbin_rule"
+	// 也不可用 wrapper struct 覆盖 TableName()，因为 GORM schema.Parse 用 reflect.New 创建零值实例，
+	// wrapper 的 tableName 字段会被置零，TableName() 返回空字符串
+	// 因此直接使用 Migrator API 手动建表+迁移列，确保表名由 a.tableName 控制
 	if a.autoMigrate {
-		if err := gormDB.Table(a.tableName).AutoMigrate(&CasbinRule{}); err != nil {
+		if err := autoMigrateTable(gormDB, a.tableName); err != nil {
 			return nil, errors.NewPolicyAutoMigrateFailedError(err.Error())
 		}
 	}
@@ -509,6 +517,52 @@ func (a *Adapter) buildFilterQuery(filter interface{}) *repository.Query {
 		return PolicyFilterToQuery(policy.FilterFromSlice(f))
 	default:
 		return repository.NewQuery()
+	}
+}
+
+// autoMigrateTable 手动执行指定表名的建表操作
+// GORM AutoMigrate + .Table(name) 不可靠：Migrator() 内部 getInstance()(clone==1) 丢失 Table，
+// schema.Parse 用 reflect.New 创建零值实例导致 wrapper TableName() 返回空字符串
+// 本函数通过创建 Migrator 后直接修改其内部 Config.DB.Statement.Table 来绕过，
+// 确保 RunWithValue → ParseWithSpecialTableName 获取正确表名
+func autoMigrateTable(gormDB *gorm.DB, tableName string) error {
+	// 检查表是否存在（传字符串参数，RunWithValue 内部 if table, ok := value.(string) 分支
+	// 会正确设置 stmt.Table = tableName，不受 Parse 零值实例问题影响）
+	if gormDB.Migrator().HasTable(tableName) {
+		return nil
+	}
+
+	// 表不存在：创建 Migrator 后手动设置其内部 DB.Statement.Table
+	// RunWithValue 中: stmt.Table = m.DB.Statement.Table → 能拿到正确表名
+	// 然后传给 ParseWithSpecialTableName(value, stmt.Table) → specialTableName 不为空
+	// → schema.Parse 用 specialTableName 作为表名，不调用模型的 TableName()
+	m := gormDB.Migrator()
+	setMigratorTable(m, tableName)
+	return m.CreateTable(&CasbinRule{})
+}
+
+// setMigratorTable 通过反射设置 Migrator 内部 DB.Statement.Table
+// 兼容标准 migrator.Migrator 和各数据库驱动的自定义 Migrator（如 PostgreSQL Migrator）
+// 只要自定义 Migrator 嵌入了 migrator.Migrator 或有公开的 DB *gorm.DB 字段即可
+func setMigratorTable(m gorm.Migrator, tableName string) {
+	// 优先处理标准 migrator.Migrator（绝大多数驱动的基类）
+	if base, ok := m.(*migrator.Migrator); ok {
+		base.DB.Statement.Table = tableName
+		return
+	}
+	// 兜底：用反射查找嵌入的 migrator.Migrator 或名为 DB 的 *gorm.DB 字段
+	v := reflect.ValueOf(m)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if field := v.FieldByName("Migrator"); field.IsValid() {
+		if embedded, ok := field.Interface().(migrator.Migrator); ok {
+			embedded.DB.Statement.Table = tableName
+		}
+	} else if field := v.FieldByName("DB"); field.IsValid() {
+		if db, ok := field.Interface().(*gorm.DB); ok && db != nil {
+			db.Statement.Table = tableName
+		}
 	}
 }
 

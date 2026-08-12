@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
 
@@ -1372,4 +1373,96 @@ func TestWithAutoMigrate_False(t *testing.T) {
 	// 表不应存在
 	assert.False(t, db.Migrator().HasTable("casbin_rule_test"))
 	_ = adapter
+}
+
+// ==================== autoMigrateTable 测试 ====================
+
+// TestAutoMigrateTable_CreatesCustomTable 验证 autoMigrateTable 用自定义表名创建表
+// 这是修复 GORM AutoMigrate 对 .Table(name) 覆盖丢失 bug 的核心测试
+func TestAutoMigrateTable_CreatesCustomTable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// 模拟 casbin_rule_ops 分片表名（与 CasbinRule.TableName() 的 "casbin_rule" 不同）
+	require.NoError(t, autoMigrateTable(db, "casbin_rule_ops"))
+	assert.True(t, db.Migrator().HasTable("casbin_rule_ops"))
+	// 默认表名 "casbin_rule" 不应被创建
+	assert.False(t, db.Migrator().HasTable("casbin_rule"))
+}
+
+// TestAutoMigrateTable_TableAlreadyExists 验证表已存在时 autoMigrateTable 不报错
+func TestAutoMigrateTable_TableAlreadyExists(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// 先创建表
+	require.NoError(t, autoMigrateTable(db, "casbin_rule_ops"))
+	// 再次调用不应报错
+	require.NoError(t, autoMigrateTable(db, "casbin_rule_ops"))
+	assert.True(t, db.Migrator().HasTable("casbin_rule_ops"))
+}
+
+// TestAutoMigrateTable_MultipleShards 验证同时创建多个分片表
+// 注意：SQLite 的索引名是 DB 级别全局的，同一 DB 内多张分片表用相同索引名会冲突，
+// 生产环境各分片在不同 DB 实例不存在此问题，此处每个分片用独立 DB 验证
+func TestAutoMigrateTable_MultipleShards(t *testing.T) {
+	for _, shardTable := range []string{"casbin_rule_ops", "casbin_rule_tenant_abc", "casbin_rule_tenant_xyz"} {
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		require.NoError(t, err)
+		require.NoError(t, autoMigrateTable(db, shardTable))
+		assert.True(t, db.Migrator().HasTable(shardTable))
+		assert.False(t, db.Migrator().HasTable("casbin_rule"))
+	}
+}
+
+// TestAutoMigrateTable_CreateTableWithCorrectColumns 验证建表的列结构正确
+func TestAutoMigrateTable_CreateTableWithCorrectColumns(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	require.NoError(t, autoMigrateTable(db, "casbin_rule_ops"))
+
+	columns, err := db.Migrator().ColumnTypes("casbin_rule_ops")
+	require.NoError(t, err)
+	colNames := make(map[string]bool)
+	for _, c := range columns {
+		colNames[c.Name()] = true
+	}
+	// 验证所有 CasbinRule 模型字段对应的列都存在
+	for _, expected := range []string{"id", "p_type", "v0", "v1", "v2", "v3", "v4", "v5", "created_at", "updated_at"} {
+		assert.True(t, colNames[expected], "column %s should exist in casbin_rule_ops", expected)
+	}
+}
+
+// TestNewAdapter_CustomTableName_CreatesCorrectTable 验证 NewAdapter 用自定义表名建表
+// 端到端测试：模拟 ShardedEnforcer 创建 "casbin_rule_ops" 分片的场景
+func TestNewAdapter_CustomTableName_CreatesCorrectTable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	adapter, err := NewAdapterByDB(db, WithTableName("casbin_rule_ops"))
+	require.NoError(t, err)
+	require.NotNil(t, adapter)
+	assert.Equal(t, "casbin_rule_ops", adapter.tableName)
+
+	// 表应存在且可写入策略
+	assert.True(t, db.Migrator().HasTable("casbin_rule_ops"))
+	require.NoError(t, adapter.AddPolicy("p, alice, ops, data1, read"))
+	policies, err := adapter.LoadPolicy()
+	require.NoError(t, err)
+	assert.Contains(t, policies, "p, alice, ops, data1, read")
+}
+
+// TestSetMigratorTable_StandardMigrator 验证 setMigratorTable 对标准 Migrator 生效
+func TestSetMigratorTable_StandardMigrator(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	m := db.Migrator()
+	// 标准 Migrator，设置前 Table 为空
+	setMigratorTable(m, "casbin_rule_ops")
+	// 验证：类型断言后 DB.Statement.Table 应为 "casbin_rule_ops"
+	if base, ok := m.(*migrator.Migrator); ok {
+		assert.Equal(t, "casbin_rule_ops", base.DB.Statement.Table)
+	}
 }

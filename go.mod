@@ -4,10 +4,10 @@ go 1.25.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/kamalyes/go-casbin v0.2.4-0.20260813140511-45ecd83d52bd
-	github.com/kamalyes/go-logger v0.5.8
-	github.com/kamalyes/go-sqlbuilder v0.6.3
-	github.com/kamalyes/go-toolbox v0.15.9
+	github.com/kamalyes/go-casbin v0.2.5
+	github.com/kamalyes/go-logger v0.6.1
+	github.com/kamalyes/go-sqlbuilder v0.6.5
+	github.com/kamalyes/go-toolbox v0.16.2
 	github.com/stretchr/testify v1.11.1
 	gorm.io/gorm v1.30.0
 )

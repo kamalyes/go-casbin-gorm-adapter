@@ -7,7 +7,7 @@ require (
 	github.com/kamalyes/go-casbin v0.2.5
 	github.com/kamalyes/go-logger v0.8.0
 	github.com/kamalyes/go-sqlbuilder v0.8.0
-	github.com/kamalyes/go-toolbox v0.18.1
+	github.com/kamalyes/go-toolbox v0.19.0
 	github.com/stretchr/testify v1.12.1
 	gorm.io/gorm v1.30.0
 )

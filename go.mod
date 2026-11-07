@@ -6,8 +6,8 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/kamalyes/go-casbin v0.2.5
 	github.com/kamalyes/go-logger v0.10.0
-	github.com/kamalyes/go-sqlbuilder v0.8.0
-	github.com/kamalyes/go-toolbox v0.19.2
+	github.com/kamalyes/go-sqlbuilder v0.9.0
+	github.com/kamalyes/go-toolbox v0.19.3
 	github.com/stretchr/testify v1.12.1
 	gorm.io/gorm v1.30.0
 )
@@ -21,7 +21,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/kamalyes/go-argus v0.5.1 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -31,8 +30,7 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/grpc v1.81.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect
